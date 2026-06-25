@@ -3,10 +3,12 @@ import traceback
 from typing import Any
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, PointStruct, VectorParams
+from qdrant_client.http.models import Distance, FieldCondition, Filter, MatchAny, MatchValue, PointStruct, Range, VectorParams
 
 from app.config import QDRANT_API_KEY, QDRANT_COLLECTION, QDRANT_URL
 from app.embedding import build_embedding_text, embed_texts, embedding_dimension, embedding_model_label
+from app.candidate_builder import first_value
+from app.schemas import SearchFilters
 
 
 def _collection_status_value(collection: Any) -> str:
@@ -134,3 +136,75 @@ def import_books(
             errors.append({"offset": offset, "code": "qdrant_upsert_failed", "message": str(exc)})
 
     return success, failed, errors
+
+
+def _filter_conditions(filters: SearchFilters | None) -> list[FieldCondition]:
+    if filters is None:
+        return []
+
+    conditions: list[FieldCondition] = []
+    if filters.language:
+        conditions.append(FieldCondition(key="language", match=MatchValue(value=filters.language)))
+    if filters.publisher:
+        conditions.append(FieldCondition(key="publisher", match=MatchValue(value=filters.publisher)))
+    if filters.subjects:
+        conditions.append(FieldCondition(key="subjects", match=MatchAny(any=filters.subjects)))
+    if filters.publish_year_from is not None or filters.publish_year_to is not None:
+        conditions.append(
+            FieldCondition(
+                key="publish_year",
+                range=Range(gte=filters.publish_year_from, lte=filters.publish_year_to),
+            )
+        )
+    return conditions
+
+
+def search_books(
+    query_vector: list[float],
+    limit: int,
+    score_threshold: float | None,
+    filters: SearchFilters | None,
+) -> list[Any]:
+    qdrant = client()
+    query_filter = None
+    conditions = _filter_conditions(filters)
+    if conditions:
+        query_filter = Filter(must=conditions)
+
+    return qdrant.search(
+        collection_name=QDRANT_COLLECTION,
+        query_vector=query_vector,
+        query_filter=query_filter,
+        limit=limit,
+        score_threshold=score_threshold,
+        with_payload=True,
+        with_vectors=False,
+    )
+
+
+def find_books_by_isbn(isbn: str, limit: int) -> list[Any]:
+    qdrant = client()
+    normalized = isbn.strip()
+    if not normalized:
+        return []
+
+    matches: list[Any] = []
+    offset = None
+    while True:
+        points, offset = qdrant.scroll(
+            collection_name=QDRANT_COLLECTION,
+            limit=100,
+            with_payload=True,
+            with_vectors=False,
+            offset=offset,
+        )
+        for point in points:
+            payload = point.payload if isinstance(point.payload, dict) else {}
+            found_isbn = first_value(payload, ("isbn", "ISBN", "_ISBN標準化", "isbn13", "ISBN13"))
+            if found_isbn is not None and normalized == str(found_isbn).strip():
+                matches.append(point)
+                if len(matches) >= limit:
+                    return matches
+        if offset is None:
+            break
+    return matches

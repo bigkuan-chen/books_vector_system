@@ -7,6 +7,7 @@ from typing import Any
 from app.config import (
     EMBEDDING_DEVICE,
     EMBEDDING_MODEL,
+    EMBEDDING_NORMALIZE,
     EMBEDDING_PROVIDER,
     OLLAMA_EMBED_DIMENSIONS,
     OLLAMA_EMBED_MODEL,
@@ -53,6 +54,10 @@ def build_embedding_text(book: dict[str, Any]) -> str:
         if text:
             lines.append(f"{labels[field]}：{text}")
     return "\n".join(lines)[:12000]
+
+
+def build_query_embedding_text(query: str) -> str:
+    return f"query: {query.strip()}"
 
 
 @lru_cache(maxsize=1)
@@ -102,7 +107,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     if EMBEDDING_PROVIDER == "ollama":
         return _ollama_embed_texts(texts)
     model = get_model()
-    vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    vectors = model.encode(texts, normalize_embeddings=EMBEDDING_NORMALIZE, show_progress_bar=False)
     return vectors.tolist()
 
 

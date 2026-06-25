@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { CheckCircle2, Database, FileJson, Play, RefreshCw, Upload, XCircle } from "lucide-react";
+import { AppHeader } from "../components/AppHeader";
 
 type Severity = "error" | "warning" | "info";
 type RecordStatus = "valid" | "warning" | "error";
@@ -57,7 +58,7 @@ type ImportStatus = {
   errors: { code: string; message: string }[];
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8001/api";
 
 export default function Home() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -79,7 +80,7 @@ export default function Home() {
       setHealth({
         qdrant_status: "error",
         qdrant_url: "http://localhost:6333",
-        collection_name: "books_collection",
+        collection_name: "books",
         collection_status: "error",
         available_collections: [],
         detail: err instanceof Error ? err.message : "連線失敗",
@@ -156,7 +157,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen">
-      <header className="border-b border-stone-200 bg-white">
+      <AppHeader />
+      <header className="hidden">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 pt-5 md:flex-row md:items-end md:justify-between">
           <div className="flex items-center gap-3 pb-4">
             <div className="h-12 w-12 overflow-hidden border border-stone-200 bg-stone-950 shadow-sm">
@@ -172,20 +174,20 @@ export default function Home() {
             </div>
           </div>
           <nav className="flex gap-1 overflow-x-auto" aria-label="主要功能">
-            <button
-              className="relative h-12 whitespace-nowrap border-x border-t border-stone-200 bg-stone-50 px-5 text-sm font-semibold text-stone-950"
-              type="button"
+            <a
+              className="relative flex h-12 items-center whitespace-nowrap border-x border-t border-stone-200 bg-stone-50 px-5 text-sm font-semibold text-stone-950"
+              href="/"
             >
               圖書向量資料庫匯入
               <span className="absolute inset-x-0 bottom-0 h-0.5 bg-teal-700" />
-            </button>
-            <button
-              className="h-12 whitespace-nowrap border-x border-t border-transparent px-5 text-sm font-medium text-stone-500 hover:border-stone-200 hover:bg-stone-50 hover:text-stone-800"
-              type="button"
+            </a>
+            <a
+              className="flex h-12 items-center whitespace-nowrap border-x border-t border-transparent px-5 text-sm font-medium text-stone-500 hover:border-stone-200 hover:bg-stone-50 hover:text-stone-800"
+              href="/book-search"
             >
               圖書向量資料查詢
               <span className="ml-2 align-middle text-xs font-normal text-stone-400">待開發</span>
-            </button>
+            </a>
           </nav>
         </div>
       </header>
@@ -209,7 +211,7 @@ export default function Home() {
             <div className="space-y-3 text-sm">
               <StatusLine label="Qdrant" ok={health?.qdrant_status === "ok"} value={health?.qdrant_status ?? "checking"} />
               <InfoLine label="URL" value={health?.qdrant_url ?? "-"} />
-              <InfoLine label="Collection" value={health?.collection_name ?? "books_collection"} />
+              <InfoLine label="Collection" value={health?.collection_name ?? "books"} />
               <InfoLine label="狀態" value={health?.collection_status ?? "-"} />
               {health?.dashboard_url ? (
                 <a className="block break-all text-xs text-teal-700 underline" href={health.dashboard_url} rel="noreferrer" target="_blank">

@@ -1,6 +1,8 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.config import DEFAULT_CANDIDATE_LIMIT, DEFAULT_LLM_MIN_SCORE, DEFAULT_TOP_K
 
 
 Severity = Literal["error", "warning", "info"]
@@ -62,3 +64,88 @@ class HealthResponse(BaseModel):
     detail: str | None = None
     error_type: str | None = None
     error_traceback: str | None = None
+
+
+class SearchFilters(BaseModel):
+    language: str | None = None
+    publisher: str | None = None
+    subjects: list[str] | None = None
+    publish_year_from: int | None = None
+    publish_year_to: int | None = None
+
+
+class BookSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=50)
+    candidate_limit: int = Field(default=DEFAULT_CANDIDATE_LIMIT, ge=5, le=100)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+    llm_min_score: float = Field(default=DEFAULT_LLM_MIN_SCORE, ge=0, le=1)
+    use_llm_rerank: bool = True
+    include_details: bool = False
+    filters: SearchFilters | None = None
+
+    @model_validator(mode="after")
+    def candidate_limit_must_cover_top_k(self) -> "BookSearchRequest":
+        if self.candidate_limit < self.top_k:
+            raise ValueError("candidate_limit must be greater than or equal to top_k")
+        return self
+
+
+class BookSearchResult(BaseModel):
+    isbn: str
+    title: str | None = None
+    authors: list[str] | str | None = None
+    publisher: str | None = None
+    publish_date: str | int | float | None = None
+    language: str | None = None
+    subjects: list[str] | str | None = None
+    description: str | None = None
+    vector_score: float
+    llm_score: float | None = None
+    final_score: float
+    reason: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+class SearchMetadata(BaseModel):
+    qdrant_candidates: int
+    llm_filtered_candidates: int
+    returned_results: int
+    llm_rerank_used: bool
+    elapsed_ms: int
+    fallback_reason: str | None = None
+    vector_elapsed_ms: int | None = None
+    llm_elapsed_ms: int | None = None
+
+
+class BookSearchResponse(BaseModel):
+    success: bool = True
+    request_id: str
+    query: str
+    count: int
+    isbns: list[str]
+    results: list[BookSearchResult] | None = None
+    metadata: SearchMetadata
+
+
+class ServiceHealth(BaseModel):
+    status: str
+    model: str | None = None
+    container: str | None = None
+    collection: str | None = None
+    detail: str | None = None
+
+
+class BookSearchHealthResponse(BaseModel):
+    success: bool
+    services: dict[str, ServiceHealth]
+
+
+class LlmSelectedCandidate(BaseModel):
+    candidate_id: str
+    score: float = Field(ge=0, le=1)
+    reason: str = Field(max_length=100)
+
+
+class LlmRerankResponse(BaseModel):
+    selected: list[LlmSelectedCandidate] = Field(default_factory=list)

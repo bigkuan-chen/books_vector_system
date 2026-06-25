@@ -1,20 +1,30 @@
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import IMPORT_BATCH_SIZE, QDRANT_COLLECTION, QDRANT_URL
+from app.config import BOOK_QUERY_API_KEY, IMPORT_BATCH_SIZE, QDRANT_COLLECTION, QDRANT_URL
+from app.embedding import embedding_model_label
+from app.llm_reranker import is_configured as llm_is_configured
 from app.qdrant_service import collection_health, import_books
-from app.schemas import HealthResponse, ImportExecuteRequest, ImportStatus, ValidationSummary
+from app.schemas import (
+    BookSearchHealthResponse,
+    BookSearchRequest,
+    BookSearchResponse,
+    HealthResponse,
+    ImportExecuteRequest,
+    ImportStatus,
+    ServiceHealth,
+    ValidationSummary,
+)
+from app.search_orchestrator import search
 from app.storage import import_store, validation_store
 from app.validation import parse_uploaded_json, validate_records
 
 
-app = FastAPI(title="Book Vector Database Importer", version="MVP-v1")
+app = FastAPI(title="Book Vector Query API", version="MVP-v3")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ],
@@ -22,6 +32,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    if not BOOK_QUERY_API_KEY or BOOK_QUERY_API_KEY == "change-me":
+        return
+    if x_api_key != BOOK_QUERY_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 @app.get("/api/health/qdrant", response_model=HealthResponse)
@@ -38,6 +55,41 @@ def qdrant_health() -> HealthResponse:
         error_type=health.get("error_type"),
         error_traceback=health.get("error_traceback"),
     )
+
+
+@app.get("/api/health", response_model=BookSearchHealthResponse)
+def book_search_health() -> BookSearchHealthResponse:
+    health = collection_health()
+    qdrant_ok = health["qdrant_status"] == "ok" and health["collection_status"] != "missing"
+    return BookSearchHealthResponse(
+        success=qdrant_ok,
+        services={
+            "api": ServiceHealth(status="healthy"),
+            "embedding": ServiceHealth(status="healthy", model=embedding_model_label()),
+            "qdrant": ServiceHealth(
+                status="healthy" if qdrant_ok else "unhealthy",
+                container="books_container",
+                collection=QDRANT_COLLECTION,
+                detail=health.get("detail"),
+            ),
+            "llm": ServiceHealth(status="healthy" if llm_is_configured() else "not_configured"),
+        },
+    )
+
+
+@app.post(
+    "/api/books/search",
+    response_model=BookSearchResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_api_key)],
+)
+def book_search(request: BookSearchRequest) -> BookSearchResponse:
+    try:
+        return search(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/import/validate", response_model=ValidationSummary)
