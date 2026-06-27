@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,12 +24,19 @@ from app.validation import parse_uploaded_json, validate_records
 
 app = FastAPI(title="Book Vector Query API", version="MVP-v3")
 
+frontend_urls = os.getenv(
+    "FRONTEND_URLS",
+)
+
+allowed_origins = [
+    url.strip()
+    for url in frontend_urls.split(",")
+    if url.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
