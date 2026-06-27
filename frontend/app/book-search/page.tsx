@@ -174,7 +174,7 @@ export default function BookSearchPage() {
         setSelectedIsbn(null);
       }
       if (!result.ok) {
-        setError(data.detail ? String(data.detail) : JSON.stringify(data));
+        setError(data.detail ? (typeof data.detail === "object" ? JSON.stringify(data.detail) : String(data.detail)) : JSON.stringify(data));
         nextStatus(`查詢失敗 HTTP ${result.status}`);
         return;
       }

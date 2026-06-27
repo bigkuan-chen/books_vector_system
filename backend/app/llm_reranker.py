@@ -93,7 +93,11 @@ def rerank_candidates(query: str, candidates: list[Candidate], llm_min_score: fl
     request = Request(
         _endpoint(),
         data=json.dumps(payload).encode("utf-8", errors="ignore"),
-        headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {LLM_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        },
         method="POST",
     )
     active_timeout = timeout if timeout is not None else API_TIMEOUT_SECONDS
