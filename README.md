@@ -2,6 +2,8 @@
 
 提供一個網頁操作介面與 FastAPI 後端，能將圖書 JSON 資料匯入 Qdrant 向量資料庫中，並提供自然語言查詢介面，結合向量檢索與 LLM 重新排序（Reranking）來精準篩選出圖書資訊。
 
+**Live Demo**: [Book Vector System](https://books-vector-system.vercel.app/book-search)
+
 ---
 
 ## 系統功能
