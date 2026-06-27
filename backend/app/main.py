@@ -177,3 +177,13 @@ def import_status(batch_id: str) -> ImportStatus:
     if status is None:
         raise HTTPException(status_code=404, detail="找不到 batch_id")
     return status
+
+@app.get("/")
+async def root():
+    return {
+        "success": True,
+        "service": "Books Vector API",
+        "status": "running",
+        "health": "/api/health",
+        "docs": "/docs"
+    }
