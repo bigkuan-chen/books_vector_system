@@ -8,7 +8,7 @@ from app.llm_reranker import rerank_candidates
 from app.qdrant_service import find_books_by_isbn, search_books
 from app.query_preprocessor import normalize_query
 from app.result_validator import reranked_results, vector_only_results
-from app.schemas import BookSearchRequest, BookSearchResponse, SearchMetadata
+from app.schemas import BookSearchRequest, BookSearchResponse, SearchMetadata, LlmDebugInfo
 
 
 def search(request: BookSearchRequest) -> BookSearchResponse:
@@ -34,10 +34,18 @@ def search(request: BookSearchRequest) -> BookSearchResponse:
     llm_rerank_used = False
     fallback_reason: str | None = None
     llm_elapsed_ms: int | None = None
+    llm_debug: LlmDebugInfo | None = None
     if request.use_llm_rerank and candidates:
         llm_started = time.perf_counter()
         try:
-            llm_response = rerank_candidates(normalized_query, candidates, request.llm_min_score)
+            llm_response, debug_info = rerank_candidates(
+                normalized_query,
+                candidates,
+                request.llm_min_score,
+                request.system_prompt,
+                timeout=request.api_timeout_seconds
+            )
+            llm_debug = debug_info
             results = reranked_results(candidates, llm_response, request.llm_min_score, request.top_k)
             llm_elapsed_ms = int((time.perf_counter() - llm_started) * 1000)
             llm_rerank_used = True
@@ -50,6 +58,7 @@ def search(request: BookSearchRequest) -> BookSearchResponse:
             traceback.print_exc()
             fallback_reason = exc.__class__.__name__
             results = vector_only_results(candidates, request.top_k)
+            llm_debug = LlmDebugInfo(raw_response=f"Exception: {str(exc)}")
     else:
         if request.use_llm_rerank and not candidates:
             fallback_reason = "NO_QDRANT_CANDIDATES"
@@ -72,5 +81,6 @@ def search(request: BookSearchRequest) -> BookSearchResponse:
             elapsed_ms=elapsed_ms,
             vector_elapsed_ms=vector_elapsed_ms,
             llm_elapsed_ms=llm_elapsed_ms,
+            llm_debug=llm_debug,
         ),
     )

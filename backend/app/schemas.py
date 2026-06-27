@@ -2,7 +2,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.config import DEFAULT_CANDIDATE_LIMIT, DEFAULT_LLM_MIN_SCORE, DEFAULT_TOP_K
+from app.config import DEFAULT_CANDIDATE_LIMIT, DEFAULT_LLM_MIN_SCORE, DEFAULT_SCORE_THRESHOLD, DEFAULT_TOP_K, API_TIMEOUT_SECONDS
+
+
+def _parse_score_threshold(val: Any) -> float | None:
+    if val is None:
+        return None
+    trimmed = str(val).strip()
+    return float(trimmed) if trimmed else None
+
+
+DEFAULT_SCORE_THRESHOLD_VAL = _parse_score_threshold(DEFAULT_SCORE_THRESHOLD)
+
 
 
 Severity = Literal["error", "warning", "info"]
@@ -78,11 +89,21 @@ class BookSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=50)
     candidate_limit: int = Field(default=DEFAULT_CANDIDATE_LIMIT, ge=5, le=100)
-    score_threshold: float | None = Field(default=None, ge=0, le=1)
+    score_threshold: float | None = Field(default=DEFAULT_SCORE_THRESHOLD_VAL, ge=0, le=1)
     llm_min_score: float = Field(default=DEFAULT_LLM_MIN_SCORE, ge=0, le=1)
     use_llm_rerank: bool = True
+    system_prompt: str | None = None
     include_details: bool = False
+    api_timeout_seconds: int | None = Field(default=API_TIMEOUT_SECONDS, ge=1, le=600)
     filters: SearchFilters | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("score_threshold") is None and DEFAULT_SCORE_THRESHOLD_VAL is not None:
+                data["score_threshold"] = DEFAULT_SCORE_THRESHOLD_VAL
+        return data
 
     @model_validator(mode="after")
     def candidate_limit_must_cover_top_k(self) -> "BookSearchRequest":
@@ -107,6 +128,13 @@ class BookSearchResult(BaseModel):
     payload: dict[str, Any] | None = None
 
 
+class LlmDebugInfo(BaseModel):
+    system_prompt: str | None = None
+    input_candidates: list[dict[str, Any]] | None = None
+    raw_response: str | None = None
+    parsed_response: dict[str, Any] | None = None
+
+
 class SearchMetadata(BaseModel):
     qdrant_candidates: int
     llm_filtered_candidates: int
@@ -116,6 +144,7 @@ class SearchMetadata(BaseModel):
     fallback_reason: str | None = None
     vector_elapsed_ms: int | None = None
     llm_elapsed_ms: int | None = None
+    llm_debug: LlmDebugInfo | None = None
 
 
 class BookSearchResponse(BaseModel):
@@ -148,4 +177,9 @@ class LlmSelectedCandidate(BaseModel):
 
 
 class LlmRerankResponse(BaseModel):
-    selected: list[LlmSelectedCandidate] = Field(default_factory=list)
+    candidate_count: int
+    evaluations: list[LlmSelectedCandidate] = Field(default_factory=list)
+
+    @property
+    def selected(self) -> list[LlmSelectedCandidate]:
+        return self.evaluations

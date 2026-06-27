@@ -7,6 +7,39 @@ import { AppHeader } from "../../components/AppHeader";
 
 const API_URL = process.env.NEXT_PUBLIC_BOOK_SEARCH_API_URL ?? "http://localhost:8001/api/books/search";
 const API_KEY = process.env.NEXT_PUBLIC_BOOK_QUERY_API_KEY ?? "";
+const DEFAULT_API_TIMEOUT = process.env.NEXT_PUBLIC_API_TIMEOUT_SECONDS ?? "90";
+const DEFAULT_TOP_K = process.env.NEXT_PUBLIC_DEFAULT_TOP_K ?? "10";
+const DEFAULT_CANDIDATE_LIMIT = process.env.NEXT_PUBLIC_DEFAULT_CANDIDATE_LIMIT ?? "30";
+const DEFAULT_SCORE_THRESHOLD = process.env.NEXT_PUBLIC_DEFAULT_SCORE_THRESHOLD ?? "";
+const DEFAULT_LLM_MIN_SCORE = process.env.NEXT_PUBLIC_DEFAULT_LLM_MIN_SCORE ?? "0.6";
+
+const DEFAULT_SYSTEM_PROMPT = `You are a book relevance evaluator, not a recommendation system.
+
+Your task is to evaluate EVERY candidate book independently against the user's query.
+
+STRICT REQUIREMENTS:
+
+1. You MUST return exactly one evaluation for every input candidate.
+2. The number of objects in "evaluations" MUST equal the provided candidate_count.
+3. Every input candidate_id MUST appear exactly once in the output.
+4. Do not omit candidates, even when their relevance score is 0.
+5. Do not return only the best, relevant, or recommended books.
+6. Do not stop after finding several relevant books.
+7. Evaluate candidates independently. One candidate's score must not affect another candidate.
+8. Score semantic relevance from 0.0 to 1.0.
+9. A score of 0.0 is valid and must still be returned.
+10. Missing information means uncertainty, not automatic irrelevance.
+11. Do not invent, modify, or normalize candidate IDs.
+12. Do not invent or return ISBNs.
+13. Keep each reason under 100 characters.
+14. Return valid JSON only. Do not use Markdown or explanatory text.
+15. Preserve the original candidate order.
+
+Before responding, verify internally that:
+- evaluations.length equals candidate_count
+- every candidate_id appears exactly once
+- no candidate_id is missing or duplicated`;
+
 
 type SearchResponse = {
   request_id?: string | null;
@@ -23,6 +56,12 @@ type SearchResponse = {
     fallback_reason?: string | null;
     vector_elapsed_ms?: number | null;
     llm_elapsed_ms?: number | null;
+    llm_debug?: {
+      system_prompt?: string | null;
+      input_candidates?: Array<Record<string, unknown>> | null;
+      raw_response?: string | null;
+      parsed_response?: Record<string, unknown> | null;
+    } | null;
   };
   [key: string]: unknown;
 };
@@ -37,10 +76,10 @@ type Filters = {
 
 export default function BookSearchPage() {
   const [query, setQuery] = useState("");
-  const [topK, setTopK] = useState("10");
-  const [candidateLimit, setCandidateLimit] = useState("30");
-  const [scoreThreshold, setScoreThreshold] = useState("");
-  const [llmMinScore, setLlmMinScore] = useState("0.6");
+  const [topK, setTopK] = useState(DEFAULT_TOP_K);
+  const [candidateLimit, setCandidateLimit] = useState(DEFAULT_CANDIDATE_LIMIT);
+  const [scoreThreshold, setScoreThreshold] = useState(DEFAULT_SCORE_THRESHOLD);
+  const [llmMinScore, setLlmMinScore] = useState(DEFAULT_LLM_MIN_SCORE);
   const [useLlm, setUseLlm] = useState(true);
   const [includeDetails, setIncludeDetails] = useState(true);
   const [language, setLanguage] = useState("");
@@ -52,7 +91,10 @@ export default function BookSearchPage() {
   const [error, setError] = useState("");
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [apiTimeout, setApiTimeout] = useState(DEFAULT_API_TIMEOUT);
   const [selectedIsbn, setSelectedIsbn] = useState<string | null>(null);
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  const [debugTab, setDebugTab] = useState<"system" | "candidates" | "raw" | "parsed">("system");
 
   function nextStatus(message: string) {
     setStatus(`狀態：${message}`);
@@ -85,7 +127,9 @@ export default function BookSearchPage() {
       score_threshold: numberOrNull(scoreThreshold),
       llm_min_score: Number(llmMinScore || 0.6),
       use_llm_rerank: useLlm,
+      system_prompt: useLlm ? systemPrompt : null,
       include_details: includeDetails,
+      api_timeout_seconds: numberOrNull(apiTimeout),
       ...(Object.keys(filters).length ? { filters } : {}),
     };
   }
@@ -146,10 +190,10 @@ export default function BookSearchPage() {
 
   function clearAll() {
     setQuery("");
-    setTopK("10");
-    setCandidateLimit("30");
-    setScoreThreshold("");
-    setLlmMinScore("0.6");
+    setTopK(DEFAULT_TOP_K);
+    setCandidateLimit(DEFAULT_CANDIDATE_LIMIT);
+    setScoreThreshold(DEFAULT_SCORE_THRESHOLD);
+    setLlmMinScore(DEFAULT_LLM_MIN_SCORE);
     setUseLlm(true);
     setIncludeDetails(true);
     setLanguage("");
@@ -160,6 +204,8 @@ export default function BookSearchPage() {
     setError("");
     setResponse(null);
     setSelectedIsbn(null);
+    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+    setApiTimeout(DEFAULT_API_TIMEOUT);
     nextStatus("已清除");
   }
 
@@ -167,20 +213,6 @@ export default function BookSearchPage() {
   const isbns = Array.isArray(response?.isbns) ? response.isbns : [];
   const results = Array.isArray(response?.results) ? (response.results as any[]) : [];
   const selectedResult = results.find((r) => r.isbn === selectedIsbn);
-
-  const selectedIndex = isbns.indexOf(selectedIsbn || "");
-
-  function handlePrev() {
-    if (selectedIndex > 0) {
-      setSelectedIsbn(isbns[selectedIndex - 1]);
-    }
-  }
-
-  function handleNext() {
-    if (selectedIndex < isbns.length - 1) {
-      setSelectedIsbn(isbns[selectedIndex + 1]);
-    }
-  }
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
@@ -249,10 +281,11 @@ export default function BookSearchPage() {
               <h2 className="text-base font-semibold">參數</h2>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="分數門檻"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={1} min={0} onChange={(event) => setScoreThreshold(event.target.value)} placeholder="不限制" step={0.01} type="number" value={scoreThreshold} /></Field>
-              <Field label="候選數量"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={100} min={5} onChange={(event) => setCandidateLimit(event.target.value)} step={1} type="number" value={candidateLimit} /></Field>
-              <Field label="Top K"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={50} min={1} onChange={(event) => setTopK(event.target.value)} step={1} type="number" value={topK} /></Field>
-              <Field label="LLM 最低分"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={1} min={0} onChange={(event) => setLlmMinScore(event.target.value)} step={0.05} type="number" value={llmMinScore} /></Field>
+              <Field label="分數門檻"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={1} min={0} onChange={(event) => setScoreThreshold(event.target.value)} placeholder={DEFAULT_SCORE_THRESHOLD ? `預設 ${DEFAULT_SCORE_THRESHOLD}` : "不限制"} step={0.01} type="number" value={scoreThreshold} /></Field>
+              <Field label="候選數量"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={100} min={5} onChange={(event) => setCandidateLimit(event.target.value)} placeholder={`預設 ${DEFAULT_CANDIDATE_LIMIT}`} step={1} type="number" value={candidateLimit} /></Field>
+              <Field label="LLM 最低分"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={1} min={0} onChange={(event) => setLlmMinScore(event.target.value)} placeholder={`預設 ${DEFAULT_LLM_MIN_SCORE}`} step={0.05} type="number" value={llmMinScore} /></Field>
+              <Field label="Top K"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={50} min={1} onChange={(event) => setTopK(event.target.value)} placeholder={`預設 ${DEFAULT_TOP_K}`} step={1} type="number" value={topK} /></Field>
+              <Field label="API 逾時 (秒)"><input className="h-10 w-full border border-slate-300 px-3 text-sm" max={600} min={1} onChange={(event) => setApiTimeout(event.target.value)} placeholder={`預設 ${DEFAULT_API_TIMEOUT}`} step={1} type="number" value={apiTimeout} /></Field>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="flex items-center justify-between gap-3 border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
@@ -264,6 +297,17 @@ export default function BookSearchPage() {
                 <input checked={includeDetails} onChange={(event) => setIncludeDetails(event.target.checked)} type="checkbox" />
               </label>
             </div>
+            {useLlm && (
+              <div className="mt-4 border-t border-slate-200 pt-4">
+                <Field label="LLM 系統提示詞 (System Prompt)">
+                  <textarea
+                    className="min-h-[140px] w-full border border-slate-300 px-3 py-2 text-xs outline-none focus:border-teal-700 font-mono leading-relaxed bg-slate-50"
+                    onChange={(event) => setSystemPrompt(event.target.value)}
+                    value={systemPrompt}
+                  />
+                </Field>
+              </div>
+            )}
             <div className="mt-4 border-t border-slate-200 pt-4">
               <h3 className="mb-3 text-sm font-semibold text-slate-800">Payload 篩選</h3>
               <div className="grid gap-3">
@@ -444,26 +488,7 @@ export default function BookSearchPage() {
                 <p className="text-sm text-slate-500 py-2">尚無查詢結果。</p>
               )}
             </div>
-            {isbns.length > 5 && (
-              <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
-                <button
-                  onClick={handlePrev}
-                  disabled={selectedIndex <= 0}
-                  className="flex-1 inline-flex h-9 items-center justify-center border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-                  type="button"
-                >
-                  上一筆
-                </button>
-                <button
-                  onClick={handleNext}
-                  disabled={selectedIndex >= isbns.length - 1}
-                  className="flex-1 inline-flex h-9 items-center justify-center border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-                  type="button"
-                >
-                  下一筆
-                </button>
-              </div>
-            )}
+
           </Panel>
           <Panel title="詳細結果">
             {selectedResult ? (
@@ -542,6 +567,62 @@ export default function BookSearchPage() {
               </pre>
             )}
           </Panel>
+
+          {response?.metadata?.llm_debug ? (
+            <Panel title="LLM 評估日誌" icon={<Settings2 size={18} />}>
+              <div className="flex border-b border-slate-200 mb-3 overflow-x-auto whitespace-nowrap">
+                {(["system", "candidates", "raw", "parsed"] as const).map((tab) => {
+                  const labels: Record<string, string> = {
+                    system: "System Prompt",
+                    candidates: "Input Candidates",
+                    raw: "LLM Raw Response",
+                    parsed: "LLM Parsed Response",
+                  };
+                  const isActive = debugTab === tab;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setDebugTab(tab)}
+                      className={`px-3 py-2 text-xs font-medium border-b-2 -mb-[2px] transition-all outline-none ${
+                        isActive
+                          ? "border-teal-600 text-teal-700 font-semibold"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                      }`}
+                      type="button"
+                    >
+                      {labels[tab]}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="bg-slate-950 text-slate-100 p-4 font-mono text-xs max-h-[400px] overflow-auto border border-slate-200 rounded-sm">
+                {debugTab === "system" && (
+                  <pre className="whitespace-pre-wrap leading-5">
+                    {response.metadata.llm_debug.system_prompt || "無 System Prompt"}
+                  </pre>
+                )}
+                {debugTab === "candidates" && (
+                  <pre className="leading-5">
+                    {response.metadata.llm_debug.input_candidates
+                      ? JSON.stringify(response.metadata.llm_debug.input_candidates, null, 2)
+                      : "無輸入候選資料"}
+                  </pre>
+                )}
+                {debugTab === "raw" && (
+                  <pre className="whitespace-pre-wrap leading-5">
+                    {response.metadata.llm_debug.raw_response || "無原始回覆"}
+                  </pre>
+                )}
+                {debugTab === "parsed" && (
+                  <pre className="leading-5">
+                    {response.metadata.llm_debug.parsed_response
+                      ? JSON.stringify(response.metadata.llm_debug.parsed_response, null, 2)
+                      : "無解析後資料"}
+                  </pre>
+                )}
+              </div>
+            </Panel>
+          ) : null}
         </section>
       </div>
     </main>
