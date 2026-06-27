@@ -23,6 +23,7 @@ def load_env_file():
 load_env_file()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+print(f"[DEBUG] Loaded QDRANT_URL: {QDRANT_URL}")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "books_collection")
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "ollama").lower()
