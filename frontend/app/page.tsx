@@ -348,21 +348,21 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto border border-stone-200">
                   <table className="w-full min-w-[760px] border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-stone-200 text-left text-xs font-medium uppercase text-stone-500">
-                        <th className="py-2 pr-3">#</th>
-                        <th className="py-2 pr-3">ISBN</th>
-                        <th className="py-2 pr-3">書名</th>
-                        <th className="py-2 pr-3">狀態</th>
-                        <th className="py-2 pr-3">訊息</th>
+                    <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
+                      <tr className="border-b border-stone-200 text-left text-xs font-medium uppercase text-stone-500 bg-white">
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 pr-3">ISBN</th>
+                        <th className="py-2.5 pr-3">書名</th>
+                        <th className="py-2.5 pr-3">狀態</th>
+                        <th className="py-2.5 pr-3">訊息</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredPreview.map((row) => (
                         <tr className="border-b border-stone-100 align-top" key={row.row_number}>
-                          <td className="py-3 pr-3 text-stone-500">{row.row_number}</td>
+                          <td className="py-3 px-3 text-stone-500">{row.row_number}</td>
                           <td className="py-3 pr-3">{row.isbn ?? "-"}</td>
                           <td className="max-w-xs py-3 pr-3">{row.title ?? "-"}</td>
                           <td className="py-3 pr-3">
